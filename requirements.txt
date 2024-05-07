@@ -1,0 +1,6 @@
+opensimplex
+scipy
+matplotlib
+numpy
+ursina
+pyvista
