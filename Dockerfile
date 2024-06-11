@@ -21,7 +21,7 @@ ENV PATH /opt/conda/bin:$PATH
 
 # Create and configure the pygplates environment and install additional tools
 RUN /bin/bash -c "source /opt/conda/bin/activate && \
-    conda create -n pygplates -c conda-forge python=3.10 pygplates cartopy platetectonictools -y" && \
+    conda create -n pygplates -c conda-forge python=3.10 pygplates cartopy platetectonictools ipykernel meshio -y" && \
     echo "source /opt/conda/bin/activate pygplates" >> ~/.bashrc
 
 # Make RUN commands use the new environment:

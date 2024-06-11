@@ -1,92 +1,16 @@
+# pylint: disable=unused-import
+
 import random
 
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
+import matplotlib.pyplot as plt
 import meshio
+import noise
 import numpy as np
 from scipy.spatial import ConvexHull  # pylint: disable=no-name-in-module
-
-
-class MeshSimpleSphere:
-    """
-    The mesh class
-    """
-
-    def __init__(self, radius, num_theta, num_phi, theta_fraction, phi_fraction):
-        """
-        Constructor
-        """
-        self.radius = radius
-        self.num_theta = num_theta
-        self.num_phi = num_phi
-        self.theta_fraction = theta_fraction
-        self.phi_fraction = phi_fraction
-
-        # Generate mesh
-        self.coords, self.topo = self.generate_mesh()
-
-    def generate_mesh(self):
-        """
-        Mesh sphere
-        """
-        # Create the mesh grid (0 <= theta <= pi, 0 <= phi <= 2*pi)
-        theta = np.linspace(0.0, 1.0 * np.pi * self.theta_fraction, self.num_theta)
-        phi = np.linspace(0.0, 2.0 * np.pi * self.phi_fraction, self.num_phi)
-
-        # Generate the nodal coordinates
-        th, ph = np.meshgrid(theta, phi, indexing="ij")
-        x = self.radius * np.sin(th) * np.cos(ph)
-        y = self.radius * np.sin(th) * np.sin(ph)
-        z = self.radius * np.cos(th)
-
-        # Reshape the arrays
-        coords = np.vstack([x.ravel(), y.ravel(), z.ravel()]).T
-
-        # Generate the elemental connectivity array manually
-        topo = []
-        for i in range(self.num_theta - 1):
-            for j in range(self.num_phi - 1):
-                n0 = i * self.num_phi + j
-                n1 = n0 + 1
-                n2 = n0 + self.num_phi
-                n3 = n2 + 1
-
-                # Add two triangles for each quadrilateral face
-                topo.append([n0, n1, n3])
-                topo.append([n0, n3, n2])
-
-        return coords, np.array(topo)
-
-    def to_vtk(self):
-        """
-        Write mesh to VTK
-        """
-        # Create mesh
-        mesh = meshio.Mesh(self.coords, [("tetra", self.topo)])
-        return mesh
-
-    def to_obj(self):
-        """
-        Write mesh to OBJ, ensuring triangular faces.
-        """
-        # Create mesh
-        mesh = meshio.Mesh(self.coords, [("triangle", self.topo)])
-        return mesh
-
-
-def main_simple():
-    """
-    main entry point
-    """
-    # Example usage:
-    radius = 5
-    num_theta = 200
-    num_phi = 200
-
-    phi_fraction = 1.00  # Fraction of mesh is phi direction, 0 < fraction <= 1
-    theta_fraction = 1.00  # fraction of mesh in theta direction, 0 < fraction <= 1
-    mesh = MeshSimpleSphere(radius, num_theta, num_phi, theta_fraction, phi_fraction)
-
-    # Write into obj
-    mesh.to_obj().write("mesh_sphere.obj")
+from scipy.spatial import KDTree  # pylint: disable=no-name-in-module
+from scipy.spatial import SphericalVoronoi
 
 
 class MeshFractionalSphere:
@@ -139,9 +63,6 @@ class MeshFractionalSphere:
         # Generate coordinates
         self.coords = self.generate_points()
 
-        # Generate mesh
-        self.topo = self.generate_mesh()
-
     def generate_points(self) -> np.ndarray:
         """
         Generates points on a sphere using the Fibonacci lattice method.
@@ -158,7 +79,7 @@ class MeshFractionalSphere:
 
         return points
 
-    def generate_mesh(self):
+    def generate_spherical_mesh(self):
         """
         Generates a triangular mesh of the sphere.
 
@@ -188,9 +109,25 @@ class MeshFractionalSphere:
 
         # Perform ConvexHull to get triangular surface mesh
         hull = ConvexHull(coords)
+        print(hull.simplices, hull.simplices.shape, type(hull.simplices))
         triangles = hull.simplices
 
         return triangles
+
+    def generate_spherical_voronoi_regions_mesh(self):
+        sv = SphericalVoronoi(self.coords, self.radius, self.center)
+        sv.sort_vertices_of_regions()
+        print(sv.regions)
+
+        voronoi_vertices = sv.vertices
+        voronoi_regions = sv.regions
+        cells = []
+
+        for region in voronoi_regions:
+            if len(region) >= 3:  # Only consider regions with 3 or more vertices
+                cells.append(region)
+
+        return voronoi_vertices, cells
 
     def _fibonacci_sphere(self, samples: int = 1000, radius: float = 1) -> np.ndarray:
         """
@@ -230,23 +167,32 @@ class MeshFractionalSphere:
         Write mesh to VTK
         """
         # Create mesh
-        mesh = meshio.Mesh(self.coords, [("triangle", self.topo)])
+        mesh = meshio.Mesh(self.coords, [("triangle", self.generate_spherical_mesh())])
         return mesh
 
-    def to_obj(self):
+    def to_obj_triangles(self):
         """
         Write mesh to OBJ, ensuring triangular faces.
         """
         # Create mesh
-        mesh = meshio.Mesh(self.coords, [("triangle", self.topo)])
+        mesh = meshio.Mesh(self.coords, [("triangle", self.generate_spherical_mesh())])
+        return mesh
+
+    def to_obj_voronoi(self):
+        voronoi_vertices, voronoi_cells = self.generate_spherical_voronoi_regions_mesh()
+        cells = []
+        for region in voronoi_cells:
+            cells.append([region])
+        voronoi_cells = np.array(cells, dtype=object)
+        mesh = meshio.Mesh(voronoi_vertices, [("polygon", voronoi_cells)])
         return mesh
 
 
 def main_fibo():
 
     radius = 8.4567
-    num_points = 100000
-    center = np.array([1.0, 2.0, 3.0])
+    num_points = 10
+    center = np.array([1.0, 20.0, 3.0])
 
     phi_fraction = 1.00
     theta_fraction = 1.00
@@ -255,7 +201,10 @@ def main_fibo():
     )
 
     # Write into obj
-    sphere.to_obj().write("mesh_sphere.obj")
+    # sphere.to_obj_triangles().write("mesh_sphere.obj")
+    sphere.to_obj_voronoi().write("mesh_sphere_voronoi.vtk")
+
+    sphere.generate_spherical_voronoi_regions_mesh()
 
     # Write into vtk
     # sphere.to_vtk().write("mesh_sphere.vtk")
